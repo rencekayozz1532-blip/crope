@@ -163,6 +163,7 @@ body.front #v{transform:scaleX(-1)}
 #err .ebtn{pointer-events:auto;margin-top:8px;min-height:48px;padding:0 28px;border:0;border-radius:999px;background:#fff;color:#000;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;touch-action:manipulation}
 #err .ebtn:active{transform:scale(.97)}
 #err .ebtn:disabled{opacity:.6}
+#err small{font-size:11px;opacity:.45;margin-top:2px}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -237,7 +238,7 @@ function onOri(e){
 let facing='environment',front=false;
 let errT=0;
 async function camFail(err){
-  const n=err&&err.name,e=$('err');
+  const n=(err&&err.name)||'Error',e=$('err');
   const app=matchMedia('(display-mode: standalone)').matches;
   const ic='<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M9.5 5h5l1.5 2H19a2 2 0 0 1 2 2v7M17 18H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1"/><path d="M9.9 10a3 3 0 0 0 4.1 4.1"/></svg>';
   let title='Camera disabled',msg,btn='Try again';
@@ -247,20 +248,20 @@ async function camFail(err){
     title='Allow camera access';
     if(st==='denied'){
       msg='Camera is off for '+(app?'this app':'this site')+'. Open Android Settings › Apps › '+(app?'CROPÉ':'Chrome')+' › Permissions › Camera › Allow. It restarts when you come back.';
-      btn='Try again';
     }else{
       msg='CROPÉ needs your camera to frame and take photos.';
       btn='Allow camera';
     }
-  }else if(n==='NotFoundError'||n==='OverconstrainedError'){msg='No camera was found on this device.';}
+  }else if(n==='Timeout'){title='Waiting for camera';msg='Tap Allow on the permission prompt. If no prompt appeared, tap Try again.';}
+  else if(n==='NotFoundError'||n==='OverconstrainedError'){msg='No camera was found on this device.';}
   else if(n==='NotReadableError'){msg='Another app is using the camera. Close it, then try again.';}
-  else{msg='The camera can’t start here. Open this page in Chrome over https.';}
-  const html=ic+'<b>'+title+'</b><span>'+msg+'</span><button type="button" class="ebtn" id="ebtn">'+btn+'</button>';
+  else{msg='The live camera can’t start here.';}
+  const html=ic+'<b>'+title+'</b><span>'+msg+'</span><button type="button" class="ebtn" id="ebtn">'+btn+'</button><small>code: '+n+'</small>';
   if(e.dataset.h!==html){
     e.innerHTML=html;e.dataset.h=html;
-    $('ebtn').onclick=async ev=>{
-      ev.stopPropagation();const b=ev.currentTarget;b.disabled=true;
-      try{await startCam();}finally{b.disabled=false;}
+    $('ebtn').onclick=ev=>{
+      ev.stopPropagation();const b=ev.currentTarget;b.disabled=true;setTimeout(()=>{b.disabled=false;},700);
+      startCam(true);
     };
   }
   e.classList.add('show');
@@ -279,37 +280,42 @@ async function getStream(){
   }
   throw last;
 }
-let camBusy=false,camQueued=false;
-async function camOnce(){
+let camBusy=false,camQueued=false,camTok=0;
+async function camOnce(tok){
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){await camFail({name:'Insecure'});return;}
   if(v.srcObject)v.srcObject.getTracks().forEach(t=>t.stop());
+  const wd=setTimeout(()=>{if(tok===camTok&&!v.classList.contains('live'))camFail({name:'Timeout'});},7000);
   let s;
   try{
     s=await getStream();
+    if(tok!==camTok){s.getTracks().forEach(t=>t.stop());return;}
     v.muted=true;v.setAttribute('playsinline','');
-    v.srcObject=s;await v.play();v.classList.add('live');
+    v.srcObject=s;await v.play();
+    if(tok!==camTok)return;
+    v.classList.add('live');
   }catch(e){
     if(s)s.getTracks().forEach(t=>t.stop());
+    if(tok!==camTok)return;
     v.srcObject=null;v.classList.remove('live');
     await camFail(e);return;
-  }
+  }finally{clearTimeout(wd);}
   $('err').classList.remove('show');
   try{setupTrack(s.getVideoTracks()[0]);}catch(e){console.error(e);}
   front=facing==='user';document.body.classList.toggle('front',front);buf=[];
   if(!started){started=true;setInterval(tick,200);requestAnimationFrame(draw);}
 }
-/* one camera start at a time: the permission change event, the Allow button and
-   page focus used to fire several starts at once and cancel each other */
-async function startCam(){
-  if(camBusy){camQueued=true;return;}
-  camBusy=true;
+/* one camera start at a time; force=true (Try again button) replaces a stuck one */
+async function startCam(force){
+  if(camBusy&&!force){camQueued=true;return;}
+  const tok=++camTok;camBusy=true;
   try{
     do{
       camQueued=false;
-      await camOnce();
+      await camOnce(tok);
+      if(tok!==camTok)return;
       if(v.srcObject&&v.srcObject.active&&v.classList.contains('live')&&front===(facing==='user'))camQueued=false;
     }while(camQueued);
-  }finally{camBusy=false;}
+  }finally{if(tok===camTok)camBusy=false;}
 }
 
 if(window.DeviceOrientationEvent&&typeof DeviceOrientationEvent.requestPermission==='function'){
@@ -583,7 +589,7 @@ function cancelTimer(){
 }
 
 $('shutter').onclick=()=>{
-  if(!v.videoWidth){startCam();return;}
+  if(!v.videoWidth){startCam(true);return;}
   if(counting){cancelTimer();return;}
   if(timerSec>0)startTimer();else takePhoto();
 };
