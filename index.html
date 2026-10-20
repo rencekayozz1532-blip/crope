@@ -165,7 +165,6 @@ body.front #v{transform:scaleX(-1)}
 #err .ebtn:disabled{opacity:.6}
 #err small{font-size:11px;opacity:.45;margin-top:2px}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
-#seeLbl{position:fixed;left:0;right:0;top:calc(env(safe-area-inset-top,0px) + 84px);text-align:center;z-index:1;pointer-events:none;font:700 30px/1.1 Georgia,'Noto Serif','Times New Roman',serif;color:#ffb347;text-shadow:0 2px 16px rgba(0,0,0,.4),0 0 2px rgba(0,0,0,.25)}
 #got{position:fixed;z-index:3;pointer-events:none;border:3px solid #ffd23f;border-radius:10px;object-fit:cover;box-shadow:0 8px 28px rgba(0,0,0,.55)}
 #shutter.working i{transform:scale(.72);opacity:.7}
 #view .stage img{background:#111}
@@ -187,7 +186,6 @@ footer{background:linear-gradient(transparent,rgba(0,0,0,.5));padding:26px 28px 
 #thumb{width:52px;height:52px;border-radius:14px;border:2px solid rgba(255,255,255,.9)}
 #zoom{bottom:calc(env(safe-area-inset-bottom,0px) + 140px)}
 #zoom button{background:rgba(0,0,0,.34);border:0}
-#seeLbl{font-size:26px;opacity:0;animation:fadeIn .9s .4s var(--ease) forwards}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 #sheet .bar{justify-content:flex-start;padding:6px 10px 10px}
@@ -204,7 +202,6 @@ footer{background:linear-gradient(transparent,rgba(0,0,0,.5));padding:26px 28px 
 <body>
 <video id="v" playsinline muted autoplay disablepictureinpicture disableremoteplayback poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></video>
 <canvas id="g"></canvas>
-<div id="seeLbl" aria-hidden="true">What I see</div>
 <img id="got" alt="" hidden>
 
 <header>
@@ -258,7 +255,7 @@ const v=$('v'),ov=$('g'),octx=ov.getContext('2d');
 const wk=document.createElement('canvas');wk.width=96;wk.height=72;
 const wctx=wk.getContext('2d',{willReadFrequently:true});
 const clamp=(x,a=0,b=1)=>Math.min(b,Math.max(a,x));
-const PRESETS=[[.22,.8],[.32,.8],[.46,.8],[.32,1]];   /* box width, shape */
+const PRESETS=[[.1,.8],[.16,.8],[.24,.8],[.34,.8],[.46,.8],[.34,1]];   /* box width, shape */
 const box={cx:.5,cy:.55};
 let pulseT=0;
 const CIRC=257.6;
@@ -305,7 +302,7 @@ async function camFail(err){
 async function getStream(){
   const hi=!('ImageCapture' in window);
   const tries=[
-    {video:{facingMode:{ideal:facing},width:{ideal:hi?2560:1280},height:{ideal:hi?1440:720},frameRate:{ideal:30,max:30}},audio:false},
+    {video:{facingMode:{ideal:facing},width:{ideal:hi?3840:1920},height:{ideal:hi?2160:1080},frameRate:{ideal:30,max:30}},audio:false},
     {video:{facingMode:{ideal:facing}},audio:false},
     {video:true,audio:false}
   ];
@@ -359,7 +356,7 @@ if(window.DeviceOrientationEvent&&typeof DeviceOrientationEvent.requestPermissio
     DeviceOrientationEvent.requestPermission().then(r=>{if(r==='granted')addEventListener('deviceorientation',onOri);}).catch(()=>{});
   },{once:true});
 }else addEventListener('deviceorientation',onOri);
-let SAVED={};try{SAVED=JSON.parse(localStorage.getItem('crope.set2')||'{}')||{};}catch(e){}
+let SAVED={};try{SAVED=JSON.parse(localStorage.getItem('crope.set3')||'{}')||{};}catch(e){}
 if(Number.isInteger(SAVED.pi)&&SAVED.pi>=0&&SAVED.pi<PRESETS.length)pi=SAVED.pi;
 if(typeof SAVED.auto==='boolean')auto=SAVED.auto;
 startCam();
@@ -439,13 +436,15 @@ function findSpot(W,H,l,S,gm){
   const area=bw*bh;
   const scoreAt=(x,y)=>{
     const si=sum(II,x,y,bw,bh);if(si<=0)return 0;
-    const relN=clamp((si/area/(gm+1e-6)-.6)/2.6);                 /* more going on than the rest of the picture */
+    const ex=Math.max(0,x-bw),ey=Math.max(0,y-bh),ew=Math.min(W,x+2*bw)-ex,eh=Math.min(H,y+2*bh)-ey;
+    const mine=si/area,ring=(sum(II,ex,ey,ew,eh)-si)/Math.max(1,ew*eh-area);
+    const stand=clamp((mine/(ring+1e-4)-1)/2.5);                    /* stands out from what is right around it */
+    const relN=clamp((mine/(gm+1e-6)-.8)/3);                         /* ...and from the whole picture */
     const cxw=(sum(IX,x,y,bw,bh)/si-x)/bw,cyw=(sum(IY,x,y,bw,bh)/si-y)/bh;
-    let t=9;for(const p of[[1/3,1/3],[2/3,1/3],[1/3,2/3],[2/3,2/3]])t=Math.min(t,Math.hypot(p[0]-cxw,p[1]-cyw));
-    const thirds=1-clamp(t/.38);                                     /* subject sits on a third */
+    const cen=1-clamp(Math.hypot(cxw-.5,cyw-.5)/.3);                 /* subject sits in the middle of the box */
     const ml=sum(IL,x,y,bw,bh)/area,expo=1-clamp(Math.max(.22-ml,ml-.82)/.2);   /* not black, not blown out */
     const edge=clamp(Math.min(x,y,W-bw-x,H-bh-y)/(Math.max(W,H)*.04));        /* not glued to the edge */
-    return .6*relN+.15*thirds+.15*expo+.1*edge;
+    return .35*stand+.3*relN+.15*cen+.1*expo+.1*edge;
   };
   let best=-1,bx=0,by=0;
   for(let y=y0;y<=y1;y+=2)for(let x=x0;x<=x1;x+=2){
@@ -464,23 +463,33 @@ function findSpot(W,H,l,S,gm){
   }
 }
 
+/* how much each pixel stands out from what surrounds it (luminance + colour) */
+function saliency(d,W,H,l,m){
+  const N=W*H,W1=W+1,S=new Float32Array(N),R=Math.max(3,Math.round(W/6)),P=[l,new Float32Array(N),new Float32Array(N)];
+  for(let i=0;i<N;i++){const r=d[i*4],g=d[i*4+1],b=d[i*4+2];P[1][i]=(r-g)/255;P[2][i]=(b-(r+g)/2)/255;}
+  for(const p of P){
+    const I=new Float64Array(W1*(H+1));
+    for(let y=0;y<H;y++){let rs=0;for(let x=0;x<W;x++){rs+=p[y*W+x];I[(y+1)*W1+x+1]=I[y*W1+x+1]+rs;}}
+    const mean=(x,y,r)=>{const x0=Math.max(0,x-r),x1=Math.min(W,x+r+1),y0=Math.max(0,y-r),y1=Math.min(H,y+r+1);
+      return(I[y1*W1+x1]-I[y0*W1+x1]-I[y1*W1+x0]+I[y0*W1+x0])/((x1-x0)*(y1-y0));};
+    for(let y=0;y<H;y++)for(let x=0;x<W;x++)S[y*W+x]+=Math.abs(mean(x,y,1)-mean(x,y,R));
+  }
+  for(let i=0;i<N;i++)S[i]+=1.5*Math.max(0,l[i]-m-.3);   /* bright highlights draw the eye */
+  return S;
+}
+
 function tick(){
   if(!v.videoWidth||document.hidden||overlayOpen())return;
-  const va=v.videoWidth/v.videoHeight,H=Math.round(Math.sqrt(9600/va)),W=Math.round(H*va);
+  const va=v.videoWidth/v.videoHeight,H=Math.round(Math.sqrt(19200/va)),W=Math.round(H*va);
   if(wk.width!==W||wk.height!==H){wk.width=W;wk.height=H;}
   wctx.drawImage(v,0,0,W,H);
   const d=wctx.getImageData(0,0,W,H).data,N=W*H;
-  const l=new Float32Array(N),sat=new Float32Array(N);let sum=0;
-  for(let i=0;i<N;i++){
-    const r=d[i*4],g=d[i*4+1],b=d[i*4+2];
-    l[i]=(.299*r+.587*g+.114*b)/255;sat[i]=(Math.max(r,g,b)-Math.min(r,g,b))/255;sum+=l[i];
-  }
+  const l=new Float32Array(N);let sum=0;
+  for(let i=0;i<N;i++){l[i]=(.299*d[i*4]+.587*d[i*4+1]+.114*d[i*4+2])/255;sum+=l[i];}
   const m=sum/N;lastM=m;autoExpose(m);
-  const S=new Float32Array(N);let gs=0,ss=0;
-  for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++){
-    const i=y*W+x,g=Math.hypot(l[i+1]-l[i-1],l[i+W]-l[i-W]);
-    gs+=g;const q=g+.5*Math.abs(l[i]-m)+.35*sat[i];S[i]=q;ss+=q;
-  }
+  const S=saliency(d,W,H,l,m);let gs=0,ss=0;
+  for(let i=0;i<N;i++)ss+=S[i];
+  for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++){const i=y*W+x;gs+=Math.hypot(l[i+1]-l[i-1],l[i+W]-l[i-W]);}
   const sharp=gs/((W-2)*(H-2));
   if(auto&&!(drag&&drag.moved))findSpot(W,H,l,S,ss/N);
   const exp=1-clamp(Math.max(.28-m,m-.72)/.25);
@@ -506,6 +515,28 @@ function capture(maxW){
 const blobOf=(c,q)=>new Promise(res=>c.toBlob(b=>res(b),'image/jpeg',q));
 const loadImg=u=>new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=u;});
 const yieldUI=()=>new Promise(r=>setTimeout(r,0));
+/* black caps tag + curved white arrow, like the reference video */
+function tag(x,t,px,py,s,mx,mid){
+  t=t.toUpperCase();x.save();x.font=`800 ${s}px system-ui,sans-serif`;x.textBaseline='middle';x.textAlign='left';
+  const w=x.measureText(t).width+s*1.1,h=s*1.7;if(mid)px-=w/2;px=clamp(px,4,mx-w-4);
+  x.fillStyle='#000';x.fillRect(px,py,w,h);x.fillStyle='#fff';x.fillText(t,px+s*.55,py+h/2+s*.04);x.restore();
+  return{x:px,y:py,w,h};
+}
+function arrow(x,sx,sy,ex,ey,lw){
+  const cx=sx-(sy-ey)*.25,cy=(sy+ey)/2,a=Math.atan2(ey-cy,ex-cx),L=lw*4.5;
+  x.save();x.strokeStyle='#fff';x.lineWidth=lw;x.lineCap=x.lineJoin='round';x.shadowColor='rgba(0,0,0,.35)';x.shadowBlur=lw*2;
+  x.beginPath();x.moveTo(sx,sy);x.quadraticCurveTo(cx,cy,ex,ey);x.stroke();
+  x.beginPath();x.moveTo(ex+L*Math.cos(a+2.6),ey+L*Math.sin(a+2.6));x.lineTo(ex,ey);x.lineTo(ex+L*Math.cos(a-2.6),ey+L*Math.sin(a-2.6));x.stroke();x.restore();
+}
+/* smooth enlarge in steps so a small crop never looks blocky */
+function upscale(c,minEdge){
+  while(Math.max(c.width,c.height)<minEdge){
+    const k=Math.min(2,minEdge/Math.max(c.width,c.height)),n=document.createElement('canvas');
+    n.width=Math.round(c.width*k);n.height=Math.round(c.height*k);
+    const x=n.getContext('2d');x.imageSmoothingQuality='high';x.drawImage(c,0,0,n.width,n.height);c=n;
+  }
+  return c;
+}
 
 function refreshThumb(){
   const s=shots[0];
@@ -600,20 +631,21 @@ async function grabStill(fMP){
 }
 
 /* cut "What I take" (the yellow box) and "What I see" (the whole screen view) out of one photo */
-async function processShot(fr,geom,va,Vv){
-  const rc=toStill(geom,va,fr.w,fr.h),rs=toStill(Vv,va,fr.w,fr.h);
-  const take=document.createElement('canvas');
+async function processShot(fr,geom,va,Vv,tele){
+  const rs=toStill(Vv,va,fr.w,fr.h),T=tele?tele.fr:fr,rc=toStill(tele?tele.geom:geom,va,T.w,T.h);
+  let take=document.createElement('canvas');
   take.width=Math.max(1,Math.round(rc.w));take.height=Math.max(1,Math.round(rc.h));
   const tx=take.getContext('2d');tx.imageSmoothingQuality='high';
-  tx.drawImage(fr.src,rc.x,rc.y,rc.w,rc.h,0,0,take.width,take.height);
+  tx.drawImage(T.src,rc.x,rc.y,rc.w,rc.h,0,0,take.width,take.height);
   const see=document.createElement('canvas'),k=Math.min(1,1600/Math.max(rs.w,rs.h));
   see.width=Math.max(1,Math.round(rs.w*k));see.height=Math.max(1,Math.round(rs.h*k));
   see.getContext('2d').drawImage(fr.src,rs.x,rs.y,rs.w,rs.h,0,0,see.width,see.height);
-  if(fr.src.src)fr.src.src='';
+  for(const f of[fr,T])if(f.src.src)f.src.src='';
   await yieldUI();
+  take=upscale(take,2400);
   try{autoLight(take);}catch(e){}
-  if(take.width*take.height<=7e6){await yieldUI();try{sharpen(take,.3);}catch(e){}}
-  const[tb,sb]=await Promise.all([blobOf(take,.94),blobOf(see,.86)]);
+  if(take.width*take.height<=12e6){await yieldUI();try{sharpen(take,.4);}catch(e){}}
+  const[tb,sb]=await Promise.all([blobOf(take,.97),blobOf(see,.9)]);
   const vx=Vv.cx-Vv.w/2,vy=Vv.cy-Vv.h/2;
   return{id:Date.now(),tb,sb,take:URL.createObjectURL(tb),see:URL.createObjectURL(sb),
     geom:{x:(geom.cx-geom.w/2-vx)/Vv.w,y:(geom.cy-geom.h/2-vy)/Vv.h,w:geom.w/Vv.w,h:geom.h/Vv.h}};
@@ -630,27 +662,58 @@ function flyIn(sh,r){
   },800);
   setTimeout(()=>{im.hidden=true;},1500);
 }
+async function refocus(x,y){
+  const fm=caps.focusMode;if(!trk||!fm||!fm.includes('single-shot')){await sleep(500);return;}
+  const a={focusMode:'single-shot'};if(caps.pointsOfInterest)a.pointsOfInterest=[{x:clamp(x),y:clamp(y)}];
+  try{await trk.applyConstraints({advanced:[a]});}catch(e){}
+  await sleep(700);
+}
 async function takePhoto(){
   if(!v.videoWidth||busy)return;
   busy=true;$('shutter').classList.add('working');
+  const zc=caps.zoom,z0=zoomV;let zoomed=false;
   try{
     const lit=!!caps.torch&&(flashMode===2||(flashMode===1&&lastM<.22));
     if(lit){await torch(true);await sleep(450);}
     const g=boxGeom(),Vv=visGeom(g.V),va=v.videoWidth/v.videoHeight;
     const rect={x:g.V.ox+(front?1-g.cx:g.cx)*g.V.fw-g.w*g.V.fw/2,y:g.V.oy+g.cy*g.V.fh-g.h*g.V.fh/2,w:g.w*g.V.fw,h:g.h*g.V.fh};
     const geom={cx:g.cx,cy:g.cy,w:g.w,h:g.h};
-    const fMP=clamp(3.5e6/(g.w*g.h),8e6,20e6);
     clickSound();buzz(25);
     const f=$('flash');f.classList.remove('on');void f.offsetWidth;f.classList.add('on');
-    let fr=await grabStill(fMP);
-    if(!fr){const c=capture(4096);fr={src:c,w:c.width,h:c.height};}
+    /* small box: zoom the real lens onto it so the crop is made of real pixels, not stretched ones */
+    const m=Math.max(Math.abs(geom.cx-.5)+geom.w/2,Math.abs(geom.cy-.5)+geom.h/2);
+    let k=zc?Math.min(.9/Math.max(geom.w,geom.h),.47/m,zc.max/z0):1;
+    if(k<1.25)k=1;
+    let fr,tele;
+    if(k>1){
+      fr=await grabStill(4e6);
+      if(!fr){const c=capture(1920);fr={src:c,w:c.width,h:c.height};}
+      try{
+        await trk.applyConstraints({advanced:[{zoom:z0*k}]});zoomed=true;
+        k=((trk.getSettings().zoom)||z0*k)/z0;
+        const tg={cx:.5+(geom.cx-.5)*k,cy:.5+(geom.cy-.5)*k,w:geom.w*k,h:geom.h*k};
+        await refocus(tg.cx,tg.cy);
+        let tf=await grabStill(clamp(3.5e6/(tg.w*tg.h),8e6,20e6));
+        if(!tf){const c=capture(4096);tf={src:c,w:c.width,h:c.height};}
+        tele={fr:tf,geom:tg};
+      }catch(e){tele=null;}
+    }else{
+      fr=await grabStill(clamp(3.5e6/(g.w*g.h),8e6,20e6));
+      if(!fr){const c=capture(4096);fr={src:c,w:c.width,h:c.height};}
+    }
     if(lit)torch(false);
-    const sh=await processShot(fr,geom,va,Vv);
+    const sh=await processShot(fr,geom,va,Vv,tele);
     shots.unshift(sh);dbPut(sh);refreshThumb();flyIn(sh,rect);
     const th=$('thumb');th.classList.remove('pop');void th.offsetWidth;th.classList.add('pop');
     if(!$('sheet').hidden)renderList();
   }catch(e){console.error(e);}
-  finally{busy=false;$('shutter').classList.remove('working');}
+  finally{
+    if(zoomed){
+      try{await trk.applyConstraints({advanced:[{zoom:z0}]});}catch(e){}
+      if(caps.focusMode&&caps.focusMode.includes('continuous'))trk.applyConstraints({advanced:[{focusMode:'continuous'}]}).catch(()=>{});
+    }
+    busy=false;$('shutter').classList.remove('working');
+  }
 }
 
 function startTimer(){
@@ -689,7 +752,7 @@ $('timerBtn').onclick=()=>openMenu($('timerBtn'),'Timer',['Off','3 seconds','10 
 
 /* grid */
 function syncBox(){
-  const[w,r]=PRESETS[pi],pw=7+(w-.22)/.24*8,ph=pw/r,R=$('szR');
+  const[w,r]=PRESETS[pi],pw=Math.max(4,7+(w-.24)/.22*8),ph=pw/r,R=$('szR');
   const set=(k,x)=>{R.setAttribute(k,x.toFixed(1));R.style[k]=x.toFixed(1)+'px';};
   set('width',pw);set('height',ph);set('x',12-pw/2);set('y',12-ph/2);
 }
@@ -821,14 +884,10 @@ async function seeUrl(s){
   c.width=w;c.height=h;
   const x=c.getContext('2d'),g=s.geom,u=w/1000,bw=g.w*w,bh=g.h*h,bx=g.x*w,by=g.y*h;
   x.drawImage(im,0,0);
-  x.textAlign='center';x.font=`700 ${Math.round(66*u)}px Georgia,'Noto Serif','Times New Roman',serif`;
-  x.shadowColor='rgba(0,0,0,.4)';x.shadowBlur=18*u;x.fillStyle='#ffb347';x.fillText('What I see',w/2,h*.14);
-  x.shadowBlur=0;
-  x.lineWidth=Math.max(3,6*u);x.strokeStyle='#ffd23f';rr(x,bx,by,bw,bh,10*u);x.stroke();
-  x.textAlign='left';x.font=`800 ${Math.round(28*u)}px system-ui,sans-serif`;
-  x.lineWidth=5*u;x.strokeStyle='rgba(0,0,0,.45)';x.strokeText('What I take',bx+14*u,by+40*u);
-  x.fillStyle='#ffd23f';x.fillText('What I take',bx+14*u,by+40*u);
-  const b=await blobOf(c,.92);
+  x.lineWidth=Math.max(3,5*u);x.strokeStyle='#ffd23f';rr(x,bx,by,bw,bh,6*u);x.stroke();
+  const up=by+bh>h*.6,tk=tag(x,'What I take',bx,up?by-40*u:by+bh+10*u,22*u,w),see=tag(x,'What I see',w/2,Math.min(h*.76,Math.max(h*.66,tk.y+tk.h+80*u)),40*u,w,true),ey=(up?by+bh:tk.y+tk.h)+22*u;
+  if(ey+60*u<see.y)arrow(x,see.x+see.w*.3,see.y-14*u,clamp(bx+bw/2,40*u,w-40*u),ey,6*u);
+  const b=await blobOf(c,.95);
   return s.cmp=URL.createObjectURL(b);
 }
 async function showView(){
@@ -898,7 +957,7 @@ function draw(ts){
   const dpr=Math.min(window.devicePixelRatio||1,1.5),W=innerWidth,H=innerHeight;
   if(ov.width!==Math.round(W*dpr)||ov.height!==Math.round(H*dpr)){ov.width=Math.round(W*dpr);ov.height=Math.round(H*dpr);}
   octx.setTransform(dpr,0,0,dpr,0,0);octx.clearRect(0,0,W,H);
-  if(!v.videoWidth||overlayOpen())return;
+  if(!v.videoWidth||overlayOpen()||busy)return;
   if(auto&&!(drag&&drag.moved)){box.cx+=(cur.bx-box.cx)*.14;box.cy+=(cur.by-box.cy)*.14;}
   const g=boxGeom(),V=g.V,bw=g.w*V.fw,bh=g.h*V.fh,bx=V.ox+(front?1-g.cx:g.cx)*V.fw-bw/2,by=V.oy+g.cy*V.fh-bh/2;
   octx.save();
@@ -908,11 +967,8 @@ function draw(ts){
   rr(octx,bx,by,bw,bh,8);octx.stroke();
   if(pu>0){octx.globalAlpha=pu*.7;octx.lineWidth=2;const e=16*(1-pu);rr(octx,bx-e,by-e,bw+2*e,bh+2*e,8+e);octx.stroke();}
   octx.restore();
-  if(bw>86){
-    octx.font='800 13px system-ui,sans-serif';octx.textBaseline='alphabetic';
-    octx.lineWidth=3.5;octx.strokeStyle='rgba(0,0,0,.45)';octx.strokeText('What I take',bx+10,by+22);
-    octx.fillStyle='#ffd23f';octx.fillText('What I take',bx+10,by+22);
-  }
+  const up=by+bh>H*.6,tk=tag(octx,'What I take',bx,up?by-26:by+bh+6,11,W),see=tag(octx,'What I see',W/2,Math.min(H*.76,Math.max(H*.64,tk.y+tk.h+44)),15,W,true),ey=(up?by+bh:tk.y+tk.h)+10;
+  if(ey+30<see.y)arrow(octx,see.x+see.w*.3,see.y-6,clamp(bx+bw/2,20,W-20),ey,2.6);
   if(roll!=null&&Math.abs(roll)>1){
     const a=-roll*Math.PI/180,ok=Math.abs(roll)<3;
     octx.save();octx.translate(W/2,H/2);octx.rotate(a);
@@ -930,7 +986,7 @@ $('view').addEventListener('touchend',e=>{
   const n=vi+(dx<0?1:-1);if(n<0||n>=shots.length)return;
   vi=n;showView();buzz(8);
 });
-function saveSet(){try{localStorage.setItem('crope.set2',JSON.stringify({pi,auto,timer:timerSec}));}catch(e){}}
+function saveSet(){try{localStorage.setItem('crope.set3',JSON.stringify({pi,auto,timer:timerSec}));}catch(e){}}
 (function(){
   if([0,3,10].includes(SAVED.timer))timerSec=SAVED.timer;
   syncBox();
