@@ -279,17 +279,37 @@ async function getStream(){
   }
   throw last;
 }
-async function startCam(){
-  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){camFail({name:'Insecure'});return;}
+let camBusy=false,camQueued=false;
+async function camOnce(){
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){await camFail({name:'Insecure'});return;}
   if(v.srcObject)v.srcObject.getTracks().forEach(t=>t.stop());
+  let s;
   try{
-    const s=await getStream();
+    s=await getStream();
     v.muted=true;v.setAttribute('playsinline','');
-    v.srcObject=s;await v.play();v.classList.add('live');setupTrack(s.getVideoTracks()[0]);
-    $('err').classList.remove('show');
-  }catch(e){await camFail(e);return;}
+    v.srcObject=s;await v.play();v.classList.add('live');
+  }catch(e){
+    if(s)s.getTracks().forEach(t=>t.stop());
+    v.srcObject=null;v.classList.remove('live');
+    await camFail(e);return;
+  }
+  $('err').classList.remove('show');
+  try{setupTrack(s.getVideoTracks()[0]);}catch(e){console.error(e);}
   front=facing==='user';document.body.classList.toggle('front',front);buf=[];
   if(!started){started=true;setInterval(tick,200);requestAnimationFrame(draw);}
+}
+/* one camera start at a time: the permission change event, the Allow button and
+   page focus used to fire several starts at once and cancel each other */
+async function startCam(){
+  if(camBusy){camQueued=true;return;}
+  camBusy=true;
+  try{
+    do{
+      camQueued=false;
+      await camOnce();
+      if(v.srcObject&&v.srcObject.active&&v.classList.contains('live')&&front===(facing==='user'))camQueued=false;
+    }while(camQueued);
+  }finally{camBusy=false;}
 }
 
 if(window.DeviceOrientationEvent&&typeof DeviceOrientationEvent.requestPermission==='function'){
@@ -298,7 +318,7 @@ if(window.DeviceOrientationEvent&&typeof DeviceOrientationEvent.requestPermissio
   },{once:true});
 }else addEventListener('deviceorientation',onOri);
 startCam();
-try{navigator.permissions&&navigator.permissions.query({name:'camera'}).then(p=>{p.onchange=()=>{if(p.state==='granted')startCam();};}).catch(()=>{});}catch(e){}
+try{navigator.permissions&&navigator.permissions.query({name:'camera'}).then(p=>{p.onchange=()=>{if(p.state==='granted'&&!(v.srcObject&&v.srcObject.active))startCam();};}).catch(()=>{});}catch(e){}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&(!v.srcObject||!v.srcObject.active))startCam();});
 if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol))navigator.serviceWorker.register('sw.js').catch(()=>{});
 let dip=null;
