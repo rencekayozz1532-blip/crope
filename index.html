@@ -154,10 +154,15 @@ body.front #v{transform:scaleX(-1)}
 #shutter i{transition:transform .2s var(--ease),background-color .25s,border-radius .2s var(--ease)}
 #shutter.timing i{transform:scale(.5);border-radius:14px}
 #sheet{touch-action:pan-y}
+#inst{position:fixed;top:calc(env(safe-area-inset-top,0px) + 68px);left:50%;transform:translateX(-50%);z-index:3;background:var(--accent);color:#1a1500;min-width:0}
+#inst:active{transform:translateX(-50%) scale(.96)}
 #err{top:50%;left:50%;right:auto;bottom:auto;transform:translate(-50%,-50%);margin:0;width:min(82%,300px);max-width:none;padding:26px 22px;border-radius:26px;display:flex;flex-direction:column;align-items:center;gap:10px;font-size:14px;font-weight:500;line-height:1.45;color:rgba(255,255,255,.75);pointer-events:none;border:1px solid rgba(255,255,255,.12);box-shadow:0 12px 36px rgba(0,0,0,.45)}
-#err.show{pointer-events:auto}
+#err.show{pointer-events:none}
 #err svg{opacity:.8;margin-bottom:2px}
 #err b{display:block;font-size:17px;font-weight:700;color:#fff}
+#err .ebtn{pointer-events:auto;margin-top:8px;min-height:48px;padding:0 28px;border:0;border-radius:999px;background:#fff;color:#000;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;touch-action:manipulation}
+#err .ebtn:active{transform:scale(.97)}
+#err .ebtn:disabled{opacity:.6}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -196,6 +201,7 @@ body.front #v{transform:scaleX(-1)}
 <div id="menu" role="menu" hidden></div>
 
 <div id="err" role="status" aria-live="polite">Camera unavailable · tap shutter to retry</div>
+<button id="inst" class="pill" hidden>Install app</button>
 
 <section id="sheet" hidden>
   <div class="bar"><h2>Photos</h2><button id="close" class="link">Done</button></div>
@@ -230,24 +236,58 @@ function onOri(e){
 
 let facing='environment',front=false;
 let errT=0;
-function camFail(err){
+async function camFail(err){
   const n=err&&err.name,e=$('err');
-  const msg=n==='NotAllowedError'||n==='SecurityError'?'Allow camera access in your browser settings, then tap to retry.'
-    :n==='NotFoundError'||n==='OverconstrainedError'?'No camera was found on this device.'
-    :n==='NotReadableError'?'Another app is using the camera. Close it, then tap to retry.'
-    :'The camera can’t start here. Open this page in Chrome over https.';
-  e.innerHTML='<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M9.5 5h5l1.5 2H19a2 2 0 0 1 2 2v7M17 18H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1"/><path d="M9.9 10a3 3 0 0 0 4.1 4.1"/></svg><b>Camera disabled</b><span>'+msg+'</span>';
+  const app=matchMedia('(display-mode: standalone)').matches;
+  const ic='<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M9.5 5h5l1.5 2H19a2 2 0 0 1 2 2v7M17 18H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1"/><path d="M9.9 10a3 3 0 0 0 4.1 4.1"/></svg>';
+  let title='Camera disabled',msg,btn='Try again';
+  if(n==='NotAllowedError'||n==='SecurityError'){
+    let st='prompt';
+    try{st=(await navigator.permissions.query({name:'camera'})).state;}catch(x){}
+    title='Allow camera access';
+    if(st==='denied'){
+      msg='Camera is off for '+(app?'this app':'this site')+'. Open Android Settings › Apps › '+(app?'CROPÉ':'Chrome')+' › Permissions › Camera › Allow. It restarts when you come back.';
+      btn='Try again';
+    }else{
+      msg='CROPÉ needs your camera to frame and take photos.';
+      btn='Allow camera';
+    }
+  }else if(n==='NotFoundError'||n==='OverconstrainedError'){msg='No camera was found on this device.';}
+  else if(n==='NotReadableError'){msg='Another app is using the camera. Close it, then try again.';}
+  else{msg='The camera can’t start here. Open this page in Chrome over https.';}
+  const html=ic+'<b>'+title+'</b><span>'+msg+'</span><button type="button" class="ebtn" id="ebtn">'+btn+'</button>';
+  if(e.dataset.h!==html){
+    e.innerHTML=html;e.dataset.h=html;
+    $('ebtn').onclick=async ev=>{
+      ev.stopPropagation();const b=ev.currentTarget;b.disabled=true;
+      try{await startCam();}finally{b.disabled=false;}
+    };
+  }
   e.classList.add('show');
 }
-$('err').onclick=()=>startCam();
+async function getStream(){
+  const hi=!('ImageCapture' in window);
+  const tries=[
+    {video:{facingMode:{ideal:facing},width:{ideal:hi?3840:1920},height:{ideal:hi?2160:1080}},audio:false},
+    {video:{facingMode:{ideal:facing}},audio:false},
+    {video:true,audio:false}
+  ];
+  let last;
+  for(const c of tries){
+    try{return await navigator.mediaDevices.getUserMedia(c);}
+    catch(e){last=e;if(e.name==='NotAllowedError'||e.name==='SecurityError'||e.name==='NotReadableError')break;}
+  }
+  throw last;
+}
 async function startCam(){
-  $('err').classList.remove('show');
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){camFail({name:'Insecure'});return;}
   if(v.srcObject)v.srcObject.getTracks().forEach(t=>t.stop());
   try{
-    const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:facing},width:{ideal:3840},height:{ideal:2160}},audio:false});
+    const s=await getStream();
+    v.muted=true;v.setAttribute('playsinline','');
     v.srcObject=s;await v.play();v.classList.add('live');setupTrack(s.getVideoTracks()[0]);
-  }catch(e){camFail(e);return;}
+    $('err').classList.remove('show');
+  }catch(e){await camFail(e);return;}
   front=facing==='user';document.body.classList.toggle('front',front);buf=[];
   if(!started){started=true;setInterval(tick,200);requestAnimationFrame(draw);}
 }
@@ -258,7 +298,13 @@ if(window.DeviceOrientationEvent&&typeof DeviceOrientationEvent.requestPermissio
   },{once:true});
 }else addEventListener('deviceorientation',onOri);
 startCam();
+try{navigator.permissions&&navigator.permissions.query({name:'camera'}).then(p=>{p.onchange=()=>{if(p.state==='granted')startCam();};}).catch(()=>{});}catch(e){}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&(!v.srcObject||!v.srcObject.active))startCam();});
 if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol))navigator.serviceWorker.register('sw.js').catch(()=>{});
+let dip=null;
+addEventListener('beforeinstallprompt',e=>{e.preventDefault();dip=e;$('inst').hidden=false;});
+addEventListener('appinstalled',()=>{dip=null;$('inst').hidden=true;});
+$('inst').onclick=async()=>{if(!dip)return;dip.prompt();try{await dip.userChoice;}catch(x){}dip=null;$('inst').hidden=true;};
 
 let trk=null,caps={},ev=0,vb=1,lastEv=0;
 function setupTrack(t){
@@ -454,17 +500,52 @@ async function torch(on){
   try{await trk.applyConstraints({advanced:[{torch:on}]});}catch(e){}
 }
 
+/* full-sensor still photo (ImageCapture) — much sharper than a video frame */
+async function stillPhoto(){
+  if(!('ImageCapture' in window)||!trk||trk.readyState!=='live')return null;
+  try{
+    const ic=new ImageCapture(trk);
+    let opts={};
+    try{
+      const pc=await ic.getPhotoCapabilities();
+      if(pc.imageWidth&&pc.imageHeight&&pc.imageWidth.max&&pc.imageHeight.max)opts={imageWidth:pc.imageWidth.max,imageHeight:pc.imageHeight.max};
+    }catch(e){}
+    const blob=await ic.takePhoto(opts);
+    const url=await new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=rej;fr.readAsDataURL(blob);});
+    const dim=await new Promise(res=>{const im=new Image();im.onload=()=>res([im.naturalWidth,im.naturalHeight]);im.onerror=()=>res(null);im.src=url;});
+    if(!dim||!dim[0]||!dim[1])return null;
+    if((dim[0]>dim[1])!==(v.videoWidth>v.videoHeight))return null;
+    return {url,dim};
+  }catch(e){return null;}
+}
+function mapXY(x,y,pw,ph){
+  const va=v.videoWidth/v.videoHeight,pa=pw/ph;
+  if(Math.abs(va-pa)<.01)return[x,y];
+  if(pa<va)return[x,.5+(y-.5)*(pa/va)];
+  return[.5+(x-.5)*(va/pa),y];
+}
+
 async function takePhoto(){
   if(!v.videoWidth||busy)return;
   busy=true;
-  const lit=!!caps.torch&&(flashMode===2||(flashMode===1&&lastM<.22));
-  if(lit){await torch(true);await sleep(450);}
-  const tap=toURL(capture(3840)),sTap=Math.round(cur.score),p=lit?null:bestFrame();
-  if(lit)torch(false);
-  const better=p&&p.s>cur.score+3,pu=better?toURL(p.u):null;
-  clickSound();
-  addShot({tap,sTap,pick:pu,sPick:better?Math.round(p.s):null},better?pu:tap,better?p.r:(roll||0),better?p.cx:cur.cx,better?p.cy:cur.cy);
-  busy=false;
+  try{
+    const lit=!!caps.torch&&(flashMode===2||(flashMode===1&&lastM<.22));
+    if(lit){await torch(true);await sleep(450);}
+    const still=await stillPhoto();
+    const sTap=Math.round(cur.score);
+    if(still){
+      if(lit)torch(false);
+      clickSound();
+      const m=mapXY(cur.cx,cur.cy,still.dim[0],still.dim[1]);
+      addShot({tap:still.url,sTap,pick:null,sPick:null},still.url,roll||0,m[0],m[1]);
+    }else{
+      const tap=toURL(capture(4096)),p=lit?null:bestFrame();
+      if(lit)torch(false);
+      const better=p&&p.s>cur.score+3,pu=better?toURL(p.u):null;
+      clickSound();
+      addShot({tap,sTap,pick:pu,sPick:better?Math.round(p.s):null},better?pu:tap,better?p.r:(roll||0),better?p.cx:cur.cx,better?p.cy:cur.cy);
+    }
+  }finally{busy=false;}
 }
 
 function startTimer(){
